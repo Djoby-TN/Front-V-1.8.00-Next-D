@@ -78,6 +78,10 @@ app.use('/api/utils', utilsRoutes);
 app.use('/api/metadatas', metadatasRoutes);
 app.use('/api/map', mapRoutes);
 
+app.get('/', (req, res) => {
+  res.send('Bienvenue sur le serveur Express !');
+});
+
 io.on('connection', (socket) => {
   console.log('Un utilisateur s\'est connecté');
 
