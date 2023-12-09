@@ -8,7 +8,7 @@ const cookieParser = require('cookie-parser');
 const cors = require('cors');
 const http = require('http');
 const socketIO = require('socket.io');
-const saveMessage = require('./utils/saveMessage');
+const {saveMessage} = require('./utils/utils');
 
 const app = express();
 const server = http.createServer(app);
@@ -25,7 +25,7 @@ const PORT = process.env.PORT || 8000;
 app.use(cors({
   origin: process.env.CORS_ORIGIN,
   credentials: true,
-}));
+})); 
 
 app.use(cookieParser());
 app.use(bodyParser.json());
@@ -63,12 +63,20 @@ const layoutRoutes = require('./routes/layout')(db);
 const marketplaceRoutes = require('./routes/marketplace')(db);
 const profileRoutes = require('./routes/profile')(db);
 const chatRoutes = require('./routes/chat');
+const adminRoutes = require('./routes/admin');
+const utilsRoutes = require('./routes/utils')
+const metadatasRoutes = require('./routes/metadatas');
+const mapRoutes = require('./routes/map')
 
 app.use('/api/auth', authRoutes);
 app.use('/api/marketplace', marketplaceRoutes);
 app.use('/api/layout', layoutRoutes);
 app.use('/api/profile', profileRoutes);
 app.use('/api/chat', chatRoutes);
+app.use('/api/admin', adminRoutes);
+app.use('/api/utils', utilsRoutes);
+app.use('/api/metadatas', metadatasRoutes);
+app.use('/api/map', mapRoutes);
 
 io.on('connection', (socket) => {
   console.log('Un utilisateur s\'est connecté');

@@ -1,15 +1,17 @@
 const express = require('express');
 const router = express.Router();
 const { Conversation } = require('../models/models');
+const myVerifyToken = require('../middleware/myVerifyToken');
+const RequestLimitor = require('../middleware/requestLimitor')
 const mongoose = require('mongoose');
 
-router.get('/history/:from/:to', async (req, res) => {
+router.get('/history/:from/:to', myVerifyToken, RequestLimitor, async (req, res) => {
   const { from, to } = req.params;
   
   try {
       const conversation = await Conversation.findOne({
         participants: { $all: [new mongoose.Types.ObjectId(from), new mongoose.Types.ObjectId(to)] }
-      }).populate('participants', 'fullName avatar');  // Ajout de populate ici
+      }).populate('participants', 'fullName avatar'); 
 
       if (conversation) {
           res.json({ success: true, messages: conversation.messages,participants: conversation.participants   
@@ -23,7 +25,7 @@ router.get('/history/:from/:to', async (req, res) => {
   }
 });
 
-router.get('/mychats', async (req, res) => {
+router.get('/mychats', RequestLimitor, async (req, res) => {
   try {
       const userId = req.query.userId;
 

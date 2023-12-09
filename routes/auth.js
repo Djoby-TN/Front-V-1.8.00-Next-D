@@ -2,9 +2,12 @@ require('dotenv').config();
 const express = require('express');
 const router = express.Router();
 const multer = require('multer');
-const { User } = require('../models/models');
+const { User, VerifCode, UserRemove, PreAuthToken} = require('../models/models');
 const axios = require('axios');
-const { VerifCode } = require('../models/models'); 
+const {reverseGeocoding} = require('../utils/utils')
+const {checkBan } = require('../middleware/Admin')
+const jwt = require('jsonwebtoken');
+const myVerifyToken = require('../middleware/myVerifyToken');
 
 
 module.exports = (db) => {  
@@ -101,7 +104,7 @@ module.exports = (db) => {
   };
   
 
-  router.post("/login", async (req, res) => {
+  router.post("/login" , async (req, res) => {
     try {
       const { phone_number } = req.body;
 
@@ -162,7 +165,31 @@ module.exports = (db) => {
 
   router.post("/signup", upload.fields([{ name: 'avatar', maxCount  : 1 }, { name: 'images', maxCount: 3 }]), async (req, res) => {
     try {
+      
+      const preAuthToken = req.headers['pre-auth-token'];
+    
+      if (!preAuthToken) {
+        return res.status(401).json({ success: false, fallback: "Aucun token de pré-authentification fourni." });
+      }
+  
+      // Vérifier le token temporaire de pré-authentification
+      const decoded = jwt.verify(preAuthToken, process.env.SECRET_KEY);
+  
+      const tokenRecord = await PreAuthToken.findOne({ token: preAuthToken });
+      if (!tokenRecord) {
+        return res.status(401).json({ success: false, fallback: "Aucun enregistrement trouvé pour ce token de pré-authentification." });
+      }
+      
+      if (tokenRecord.used) {
+        return res.status(401).json({ success: false, fallback: "Ce token de pré-authentification a déjà été utilisé." });
+      }
+      
+      // Marquer le preAuthToken comme utilisé
+      tokenRecord.used = true;
+      await tokenRecord.save();
 
+
+      
       const data = JSON.parse(req.body.data); 
 
       console.log("Uploaded Images:", req.files['images']);
@@ -178,27 +205,113 @@ module.exports = (db) => {
         bio: data.bio,
         images: req.files['images'] ? req.files['images'].map(file => file.path) : [],
         position: {
-          latitude: data.position[0],
-          longitude: data.position[1],
+          latitude: data.position.lat,
+          longitude: data.position.lng,
         }
 
       });
+      const addressDetails = await reverseGeocoding(user.position.latitude, user.position.longitude);
+      if (addressDetails) {
+        console.log("Détails de l'adresse:", addressDetails);
+        user.addressDetails = {
+          street: addressDetails.route || '',
+          city: addressDetails.locality || '',
+          state: addressDetails.administrative_area_level_1 || '',
+          country: addressDetails.country || '',
+          postalCode: addressDetails.postal_code || '',
+        };
+      } else {
+        console.log("Aucune adresse trouvée pour ces coordonnées.");
+      }
 
       await user.save()
 
+      const token = jwt.sign({ id: user._id }, process.env.SECRET_KEY, { expiresIn: '30d' });
+      console.log(token)
+
+
       res.json({
+        token: token,
         data: user,
         success: true, 
         fallback: "L'utilisateur a ete ajoute avec succes dans la base de donne"
       })
-
-    } catch(error) {
-      console.log("Echec lors de l'ajout du user dans la base de donne." + error + " \n ")
-      res.json({ success: false, error: "Error sending user" });
+    } catch (error) {
+      if (error.name === 'JsonWebTokenError') {
+        return res.status(401).json({ success: false, fallback: "Le token de pré-authentification fourni est invalide." });
+      } else if (error.name === 'TokenExpiredError') {
+        return res.status(401).json({ success: false, fallback: "Le token de pré-authentification a expiré." });
+      } else {
+        console.error("Erreur lors de l'inscription:", error);
+        return res.status(500).json({ success: false, error: "Une erreur interne est survenue lors de l'inscription." });
+      }
     }
-  }); 
+  });
 
   router.post("/verification", async (req, res) => {
+    try {
+      console.log("Request Body : " + req.body + "\n");
+
+      console.log("Request Body phone_number : " + req.body.phone_number + "\n");
+
+      console.log("Request Body verification_code  : " + req.body.verification_code + "\n");
+
+      const { code, phone } = req.body
+
+
+
+      const new_code = parseInt(code)
+
+      const verifCode = await VerifCode.findOne({
+        phoneNumber: phone,
+        verificationCode: new_code,
+      });
+
+      console.log("Cherche des donnes du front dans la database : " + verifCode + '\n' + '-------------------------------' + '\n');
+
+      const user = await db.collection('users').findOne({
+        phoneNumber: phone,
+      });
+
+      
+      if (!verifCode) {
+        return res.json({
+          success: false,
+          fallback: "The verification code is wrong"
+        });
+      } else{
+        const token = jwt.sign({ id: user._id }, process.env.SECRET_KEY, { expiresIn: '30d' });
+        console.log(token)
+
+        if(user){
+          return res.json({
+            data: user,
+            token: token,
+            success: true,
+            fallback: "Session initialisee avec succes!"
+          });
+        }
+        res.json({ success: true, token: token, fallback: "Le code de verification est juste" });
+      } 
+
+      const suppressionDuCode = await db.collection('verifcodes').deleteOne({
+        phoneNumber: phone,
+        verificationCode: new_code,
+      });
+
+      if (suppressionDuCode) {
+        console.log("Le code a ete supprime avec succes");
+      } else{
+        console.log("Erreur lors de la suppression du code");
+      }
+    }
+    catch (error) {
+      console.error('Une erreur s\'est produite lors de la verification du code de verification :', error);
+      throw error;
+    }
+  });
+  // Pour signup
+  router.post("/verificationSignup", async (req, res) => {
     try {
       console.log("Request Body : " + req.body + "\n");
 
@@ -239,15 +352,27 @@ module.exports = (db) => {
           fallback: "The verification code is wrong"
         });
       } else{
+
+        const preAuthToken = jwt.sign({ phone: phone }, process.env.SECRET_KEY, { expiresIn: '10m' });
+
+        const tokenRecord = new PreAuthToken({
+          token: preAuthToken,
+          used: false,
+          phone: phone,
+        });
+        await tokenRecord.save();
+
+
         if(user){
           return res.json({
             data: user,
             success: true,
+            preAuthToken,
             fallback: "Session initialisee avec succes!"
           });
         }
-        res.json({ success: true, fallback: "Le code de verification est juste" });
-      }
+        res.json({ success: true, preAuthToken, fallback: "Le code de verification est juste" });
+      } 
 
       const suppressionDuCode = await db.collection('verifcodes').deleteOne({
         phoneNumber: phone,
@@ -265,6 +390,47 @@ module.exports = (db) => {
       throw error;
     }
   });
+
+  // Delete an account 
+
+  router.post('/deleteSelf', myVerifyToken, async (req,res) => {
+    const { _id } = req.body;
+    
+    console.log(_id)
+
+    try {
+
+      const user = await User.findById(_id)
+  
+      if (!user) {
+          return res.status(404).json({ message: "Utilisateur non trouvé." });
+      }
+  
+      const removeUser = new UserRemove({
+          ...user.toObject(), 
+          deletedDate: new Date() 
+      });
+  
+      await removeUser.save()
+  
+      await User.deleteOne({ _id: _id })
+  
+      res.status(200).json({ message: "Votre compte a été supprimée et archivée avec succès." });
+  
+  
+      } catch(error) {
+          console.error('Erreur lors de la suppression de votre compte:', error);
+          res.status(500).json({ message: 'Une erreur interne est survenue.' });
+      }
+
+  })
+
+  // Generez un token lorsque pas connecte 
+  router.get('/generateGuestToken', (req, res) => {
+    const guestToken = jwt.sign({ guest: true }, process.env.SECRET_KEY, { expiresIn: '1h' });
+    res.json({ guestToken });
+});
+
 
   return router;
 };

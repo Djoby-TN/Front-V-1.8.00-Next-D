@@ -2,7 +2,12 @@ require('dotenv').config();
 const express = require('express');
 const router = express.Router();
 const multer = require('multer');
-const { Offre, Demande } = require('../models/models');
+const myVerifyToken = require("../middleware/myVerifyToken")
+const verifyToken = require("../middleware/verifyToken")
+const RequestLimitor = require('../middleware/requestLimitor')
+const jwt = require('jsonwebtoken');
+const { calculateDistance, getFilteredOffres, getFilteredDemandes } = require('../utils/utils'); 
+const { Offre, Demande ,} = require('../models/models');
 
 module.exports = (db) => {  
   
@@ -19,91 +24,166 @@ module.exports = (db) => {
           storage: storage
       });
      
-    router.post("/add", upload.fields([{ name: 'images', maxCount: 3 }]), async (req, res) => {
+      router.post("/add",  upload.fields([{ name: 'images', maxCount: 3 }]), async (req, res) => {
+        try {
+            const data = JSON.parse(req.body.data);
+             
 
-      try {
+            if(data.annonceType == 'Offre'){
+                const offre = new Offre({
+                    user: data.userId._id,
+                    annonceType: data.annonceType,
+                    metier: data.metier,
+                    description: data.description,
+                    disponibilite: data.disponibilite,
+                    tarif: data.tarif,
+                    images: req.files['images'] ? req.files['images'].map(file => file.path) : [],
+                });
+    
+                await offre.save();
 
-        const data = JSON.parse(req.body.data);
-         
-        console.log("Uploaded Images:", req.files['images']);
-        console.log('User id ',data.userId._id)
-        if(data.annonceType == 'Offre'){
-            const offre = new Offre({
-                user: data.userId._id,
-                annonceType: data.annonceType,
-                metier: data.metier,
-                description: data.description,
-                disponibilite: data.disponibilite,
-                tarif: data.tarif,
-                images: req.files['images'] ? req.files['images'].map(file => file.path) : [],
-            })
+                const matchedDemandes = await Demande.find({ metier: data.metier });
+                const matchingDemandeIds = matchedDemandes.map(demande => demande._id);
+    
 
-            await offre.save()
-
-            res.json({success: true, fallback: "L'annonce a ete cree avec succes"})
+                res.json({success: true, fallback: "L'annonce a ete cree avec succes"});
+            }
+    
+            if(data.annonceType == 'Demande'){
+                const demande = new Demande({
+                    user: data.userId._id,
+                    annonceType: data.annonceType,
+                    metier: data.metier,
+                    description: data.description,
+                    disponibilite: data.disponibilite,
+                    tarif: data.tarif,
+                    images: req.files['images'] ? req.files['images'].map(file => file.path) : [],
+                });
+    
+                await demande.save();
+    
+           
+    
+                res.json({success: true, fallback: "L'annonce a ete cree avec succes"});
+            }
+        } catch (error) {
+            console.error(error);
+            return res.json({ success: false, fallback: "An error occurred" });
         }
-
-        if(data.annonceType == 'Demande'){
-            const demande = new Demande({
-                user: data.userId._id,
-                annonceType: data.annonceType,
-                metier: data.metier,
-                description: data.description,
-                disponibilite: data.disponibilite,
-                tarif: data.tarif,
-                images: req.files['images'] ? req.files['images'].map(file => file.path) : [],
-            })
-
-            await demande.save()
-
-            res.json({success: true, fallback: "L'annonce a ete cree avec succes"})
-        }
-      } catch (error) {
-        console.error(error);
-        return res.json({ success: false, fallback: "An error occurred" });
-      }
-  
     });
+    
 
-    router.get('/filtregetoffres', async (req, res) => {
-      try {
-          let offres;
-  
-          if (req.query.userId) {
-              offres = await Offre.find({ user: req.query.userId }).populate('user', 'fullName avatar position');
-          } else if (req.query.metier) {
-              offres = await Offre.find({ metier: req.query.metier }).populate('user', 'fullName avatar position');
-          } else {
-              offres = await Offre.find().populate('user', 'fullName avatar position');
+    // Get les offres et demandes
+
+    router.get('/getoffres', async (req, res) => {
+        try {
+          let token = req.cookies.guestToken || req.headers['authorization'];
+          let bearerToken; // Déclaration de la variable au début du bloc try pour une portée plus large
+      
+          if (token) {
+            // Extraire le token sans le mot clé 'Bearer'
+            bearerToken = token.split(' ')[1]; // Utilisation de let retirée pour déclarer la variable au début du bloc
+      
+            try {
+              jwt.verify(bearerToken, process.env.SECRET_KEY);
+            } catch (err) {
+              console.error('Erreur de vérification du token:', err);
+              token = null; // Si le token est incorrect, le mettre à null
+            }
           }
-  
-          return res.json({ success: true, fallback: "Les offres ont ete get avec succes", data: offres });
-      } catch (error) {
+      
+          const { metier, latitude, longitude } = req.query;
+          const position = latitude && longitude ? { latitude, longitude } : null;
+      
+          // Assurez-vous que bearerToken est transmis à la fonction getFilteredOffres
+          const offres = await getFilteredOffres(metier, position, bearerToken);
+      
+          return res.json({ success: true, fallback: "Les offres ont été récupérées avec succès", data: offres });
+        } catch (error) {
           console.error(error);
-          return res.json({ success: false, fallback: "Failed to get the annonces" });
-      }
-    });
+          return res.json({ success: false, fallback: "Échec de la récupération des annonces" });
+        }
+      });
+      
+    
+      
 
-    router.get('/filtregetdemandes', async (req, res ) => {
+    router.get('/getdemandes', RequestLimitor , async (req, res ) => {
     try {
-            let demandes;
+      let token = req.cookies.guestToken || req.headers['authorization'];
+      let bearerToken; // Déclaration de la variable au début du bloc try pour une portée plus large
+  
+      if (token) {
+        // Extraire le token sans le mot clé 'Bearer'
+        bearerToken = token.split(' ')[1]; // Utilisation de let retirée pour déclarer la variable au début du bloc
+  
+        try {
+          jwt.verify(bearerToken, process.env.SECRET_KEY);
+        } catch (err) {
+          console.error('Erreur de vérification du token:', err);
+          token = null; // Si le token est incorrect, le mettre à null
+        }
+      }
 
-            if (req.query.userId) {
-              demandes = await Demande.find({ user: req.query.userId }).populate('user', 'fullName avatar position');
-          } else if (req.query.metier) {
-              demandes = await Demande.find({ metier: req.query.metier }).populate('user', 'fullName avatar position');
-          } else {
-              demandes = await Demande.find().populate('user', 'fullName avatar position');
+      const { metier, latitude, longitude } = req.query;
+      const position = latitude && longitude ? { latitude, longitude } : null;
+  
+      // Assurez-vous que bearerToken est transmis à la fonction getFilteredOffres
+      const demandes = await getFilteredDemandes(metier, position, bearerToken);
+  
+      return res.json({ success: true, fallback: "Les demandes ont été récupérées avec succès", data: demandes });
+    } catch (error) {
+      console.error(error);
+      return res.json({ success: false, fallback: "Échec de la récupération des demandes" });
+    }
+  });
+
+
+
+  // get mes offres et demandes
+        
+
+  router.get('/mesoffres', myVerifyToken, async (req, res) => {
+    try {
+
+        let offres;
+        const { userId} = req.query;
+
+        if (userId) {
+            offres = await Offre.find({ user: req.query.userId }).populate('user', 'fullName avatar position addressDetails ');
           }
 
-          return res.json({ success: true, fallback: "Les offres ont ete get avec succes", data: demandes });
-      } catch (error) {
-          console.error(error);
-          return res.json({ success: false, fallback: "Failed to get the annonces" });
-      }
-    });
+        return res.json({ success: true, fallback: "Vos offres ont été récupérées avec succès", data: offres });
+    } catch (error) {
+        console.error(error);
+        return res.json({ success: false, fallback: "Failed to get vos annonces" });
+    }
+  });
 
-      router.get('/annonce/:type/:id', async (req, res) => {
+
+    router.get('/mesdemandes', RequestLimitor , async (req, res ) => {
+        try {
+                let demandes;
+
+                const { userId} = req.query;
+
+    
+                if (userId) {
+                  demandes = await Demande.find({ user: req.query.userId }).populate('user', 'fullName avatar position addressDetails ');
+              } 
+    
+             
+    
+              return res.json({ success: true, fallback: "Vos demandes ont ete get avec succes", data: demandes });
+          } catch (error) {
+              console.error(error);
+              return res.json({ success: false, fallback: "Failed vos demandes" });
+          }
+        });
+
+
+
+      router.get('/annonce/:type/:id', RequestLimitor, verifyToken , async (req, res) => {
         const id = req.params.id;
         const annonceType = req.params.type;
     
@@ -132,6 +212,7 @@ module.exports = (db) => {
             res.status(500).json({ error: 'Internal Server Error' });
         }
     });
+  
     
 
     return router;

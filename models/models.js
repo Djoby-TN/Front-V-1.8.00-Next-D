@@ -1,5 +1,16 @@
 const mongoose = require('mongoose');
 
+const PreAuthTokenModel = new mongoose.Schema({
+  token: String,
+  used: {
+    type: Boolean,
+    default: false
+  },
+  phone: String,
+});
+
+const PreAuthToken = mongoose.model('PreAuthToken', PreAuthTokenModel);
+
 const verifCodeSchema = new mongoose.Schema({
     phoneNumber: String,
     verificationCode: Number,
@@ -26,6 +37,13 @@ const userSchema = new mongoose.Schema({
       latitude: Number,
       longitude: Number,
     },
+    addressDetails: {
+      street: String,
+      city: String,
+      state: String,
+      country: String,
+      postalCode: String,
+    },
     userType: String,
     interestedServices: [String],
     createdDate: {
@@ -44,9 +62,91 @@ const userSchema = new mongoose.Schema({
       type: mongoose.Schema.Types.ObjectId,
       ref: 'Commentaire',
     }],
+    isBanned: {
+      status: {
+          type: Boolean,
+          default: false
+      },
+      details: {
+          bannedBy: String,
+          banReason: String,
+          banStart: Date,
+          banEnd: Date
+      },
+      lastBans: [{
+        bannedBy: String,
+        banReason: String,
+        banStart: Date,
+        banEnd: Date
+    }],
+  },
 });
   
 const User = mongoose.model('User', userSchema);
+
+const userSchemaDeleted = new mongoose.Schema({
+  phoneNumber: String,
+  fullName: String,
+  age: Number,
+  avatar: String,
+  rating: Number,
+  bio: String,
+  images: [String],
+  position: {
+    latitude: Number,
+    longitude: Number,
+  },
+  addressDetails: {
+    street: String,
+    city: String,
+    state: String,
+    country: String,
+    postalCode: String,
+  },
+  userType: String,
+  interestedServices: [String],
+  createdDate: {
+    type: Date,
+    default: Date.now,
+  },
+  offres: [{
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Offre',
+  }],
+  demandes: [{
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Demande',
+  }],
+  commentaires: [{
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Commentaire',
+  }],
+  isBanned: {
+    status: {
+        type: Boolean,
+        default: false
+    },
+    details: {
+        bannedBy: String,
+        banReason: String,
+        banStart: Date,
+        banEnd: Date
+    },
+    lastBans: [{
+      bannedBy: String,
+      banReason: String,
+      banStart: Date,
+      banEnd: Date
+  }],
+},
+removedDate: {
+  type: Date,
+  default: Date.now,
+},
+});
+
+const UserRemove = mongoose.model('UserArchived', userSchemaDeleted);
+
   
 const commentaireSchema = new mongoose.Schema({
     receiver: {
@@ -100,6 +200,47 @@ const offreSchema = new mongoose.Schema({
   
 const Offre = mongoose.model('Offre', offreSchema);
 
+// const offreCorrespondanceSchema = new mongoose.Schema({
+//   user: {  // L'ID de l'utilisateur qui a créé l'offre
+//       type: mongoose.Schema.Types.ObjectId,
+//       ref: 'User',
+//       required: true
+//   },
+//   demandes: [  // Les IDs des demandes qui correspondent à l'offre de cet utilisateur
+//       {
+//           type: mongoose.Schema.Types.ObjectId,
+//           ref: 'Demande'
+//       }
+//   ],
+//   dateCreation: {
+//       type: Date,
+//       default: Date.now
+//   }
+// });
+
+// const OffreCorrespondance = mongoose.model('OffreCorrespondance', offreCorrespondanceSchema);
+
+// const demandeCorrespondanceSchema = new mongoose.Schema({
+//   annonce: {  // L'ID de la demande
+//       type: mongoose.Schema.Types.ObjectId,
+//       ref: 'Demande',
+//       required: true
+//   },
+//   users: [  
+//       {
+//           type: mongoose.Schema.Types.ObjectId,
+//           ref: 'User'
+//       }
+//   ],
+//   dateCreation: {
+//       type: Date,
+//       default: Date.now
+//   }
+// });
+
+// const DemandeCorrespondance = mongoose.model('DemandeCorrespondance', demandeCorrespondanceSchema);
+
+
 const messageSchema = new mongoose.Schema({
   content: String,
   from: {
@@ -126,8 +267,31 @@ const conversationSchema = new mongoose.Schema({
   messages: [messageSchema],
 });
 
-
 const Conversation = mongoose.model('Conversation', conversationSchema);
 
-module.exports = { VerifCode, Feedback, User, Commentaire, Demande, Offre, Conversation };
+const removedAnnonceSchema = new mongoose.Schema({
+  user: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'User',
+  },
+  annonceType: String,
+  metier: String,
+  description: String,
+  disponibilite: [String],
+  images: [String],
+  tarif: String,
+  createdDate: {
+    type: Date,
+    default: Date.now,
+  },
+  deletedDate: Date,
+});
+
+const RemovedAnnonce = mongoose.model('RemovedAnnonce', removedAnnonceSchema);
+
+
+
+
+
+module.exports = { VerifCode, Feedback, User, Commentaire, Demande, Offre, Conversation, RemovedAnnonce, UserRemove, PreAuthToken };
 

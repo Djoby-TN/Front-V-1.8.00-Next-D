@@ -1,11 +1,13 @@
 require('dotenv').config();
 const express = require('express');
 const router = express.Router();
+const verifyToken = require('../middleware/verifyToken');
+const RequestLimitor = require('../middleware/requestLimitor')
 const { Feedback } = require('../models/models');
 
 module.exports = (db) => {  
   
-    router.post("/feedback", async (req, res) => {
+    router.post("/feedback", verifyToken, RequestLimitor, async (req, res) => {
       try {
         const title = req.body.title;
         const description = req.body.description;

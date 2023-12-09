@@ -1,6 +1,9 @@
 const express = require('express');
 const router = express.Router();
 const { User } = require('../models/models');
+const verifyToken = require('../middleware/verifyToken');
+const myVerifyToken = require("../middleware/myVerifyToken")
+const RequestLimitor = require('../middleware/requestLimitor')
 const multer = require('multer');
 
 module.exports = (db) => {  
@@ -19,7 +22,7 @@ module.exports = (db) => {
   });
 
 
-    router.get('/:id', async (req, res) => {
+    router.get('/:id', RequestLimitor, async (req, res) => {
         const userId = req.params.id;
         try {
           const user = await User.findById(userId);
@@ -33,7 +36,7 @@ module.exports = (db) => {
         }
     });
 
-    router.post("/update", upload.fields([{ name: 'avatar', maxCount  : 1 }, { name: 'images', maxCount: 3 }]), async (req, res) => {
+    router.post("/update",myVerifyToken, RequestLimitor, upload.fields([{ name: 'avatar', maxCount  : 1 }, { name: 'images', maxCount: 3 }]), async (req, res) => {
       try {
   
         const data = JSON.parse(req.body.data); 
@@ -66,7 +69,7 @@ module.exports = (db) => {
         })
   
       } catch(error) {
-        console.log("Échec de la mise à jour du profil" + error + " \n ")
+        console.log("Échec de la mise à jour du profil :" + error + " \n ")
         res.json({ success: false, error: "Échec de la mise à jour du profil" });
       }
     }); 
